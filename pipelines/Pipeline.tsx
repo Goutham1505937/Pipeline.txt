@@ -1,0 +1,1058 @@
+import React, { useMemo, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  ShieldCheck,
+  Wand2,
+  Database,
+  CheckCircle2,
+  AlertTriangle,
+  Layers,
+  Code2,
+} from "lucide-react";
+
+// Visual prototype only (no backend calls). Replace mock transforms with real services later.
+
+type StageId =
+  | "ingestion"
+  | "perception"
+  | "assisted_extraction"
+  | "canonicalisation"
+  | "normalisation"
+  | "validation"
+  | "output";
+
+type Stage = {
+  id: StageId;
+  title: string;
+  type: "Agentic" | "Deterministic";
+  icon: React.ReactNode;
+  summary: string;
+  whatHappens: string[];
+};
+
+type StageOutput = {
+  kind: "json" | "text";
+  title: string;
+  value: string;
+};
+
+const sampleIncomeStatement = `ACME HOLDINGS PTE LTD
+Income Statement (Unaudited)
+For the year ended 31 Dec 2024
+
+Revenue                                  12,500,000
+Cost of Goods Sold                        (7,200,000)
+-----------------------------------------------
+Gross Profit                               5,300,000
+Operating Expenses                         (2,150,000)
+-----------------------------------------------
+Operating Profit                           3,150,000
+Finance Costs                                (250,000)
+Other Income                                  100,000
+-----------------------------------------------
+Profit Before Tax                          3,000,000
+Tax Expense                                  (600,000)
+-----------------------------------------------
+Net Profit                                 2,400,000
+
+Currency: SGD (in whole dollars)
+`;
+
+function pretty(obj: unknown) {
+  return JSON.stringify(obj, null, 2);
+}
+
+function buildCsv(
+  header: string[],
+  row: Array<string | number | undefined | null>
+) {
+  // NOTE: This is an *excel-friendly* CSV string builder for the prototype.
+  // If you need RFC4180 quoting (commas, quotes), replace this with a robust encoder.
+  const safeRow = row.map((v) => (v === undefined || v === null ? "" : String(v)));
+  return header.join(",") + "\n" + safeRow.join(",") + "\n";
+}
+
+export default function PipelineVisualPrototype() {
+  const [activeTab, setActiveTab] = useState<"prototype" | "ir" | "candidate" | "rules">(
+    "prototype"
+  );
+  const [showSourcePreview, setShowSourcePreview] = useState(true);
+
+  const stages: Stage[] = useMemo(
+    () => [
+      {
+        id: "ingestion",
+        title: "Ingestion",
+        type: "Deterministic",
+        icon: <FileText className="h-5 w-5" />,
+        summary: "Accept PDF upload, store securely, extract basic metadata.",
+        whatHappens: [
+          "Validate file type/size",
+          "Assign document_id",
+          "Persist raw document to object storage",
+          "Extract basic metadata (title, dates if present)",
+        ],
+      },
+      {
+        id: "perception",
+        title: "Perception & Classification",
+        type: "Agentic",
+        icon: <Wand2 className="h-5 w-5" />,
+        summary: "LLM-assisted understanding of statement type and structural cues.",
+        whatHappens: [
+          "Detect statement type (Income Statement)",
+          "Identify key sections/rows and table-like layout",
+          "Produce classification + confidence",
+        ],
+      },
+      {
+        id: "assisted_extraction",
+        title: "Assisted Extraction",
+        type: "Agentic",
+        icon: <Layers className="h-5 w-5" />,
+        summary: "LLM proposes candidate values + context; preserves ambiguity.",
+        whatHappens: [
+          "Extract candidate labels/values",
+          "Attach structural context (section, table, row, page)",
+          "Emit confidence per candidate",
+        ],
+      },
+      {
+        id: "canonicalisation",
+        title: "Canonicalisation (IR Enforcement)",
+        type: "Deterministic",
+        icon: <Database className="h-5 w-5" />,
+        summary: "Map candidates into Canonical IR; enforce schema and provenance.",
+        whatHappens: [
+          "Map candidates → IR fields",
+          "Resolve conflicts deterministically",
+          "Attach provenance for each field",
+        ],
+      },
+      {
+        id: "normalisation",
+        title: "Normalisation",
+        type: "Deterministic",
+        icon: <ShieldCheck className="h-5 w-5" />,
+        summary: "Standardize units, periods, formats; ensure consistency.",
+        whatHappens: [
+          "Normalize currency/scale",
+          "Normalize reporting period",
+          "Standardize numeric formats",
+        ],
+      },
+      {
+        id: "validation",
+        title: "Validation & Confidence Gate",
+        type: "Deterministic",
+        icon: <CheckCircle2 className="h-5 w-5" />,
+        summary: "Apply rules (totals, consistency) and decide pass vs HITL.",
+        whatHappens: [
+          "Run deterministic checks",
+          "Aggregate confidence",
+          "If exceptions: route to MS Teams HITL",
+        ],
+      },
+      {
+        id: "output",
+        title: "Output Generation",
+        type: "Deterministic",
+        icon: <FileText className="h-5 w-5" />,
+        summary: "Emit CSV and audit metadata for downstream processing.",
+        whatHappens: [
+          "Generate CSV",
+          "Persist output",
+          "Return link + metadata",
+        ],
+      },
+    ],
+    []
+  );
+
+  const [idx, setIdx] = useState(0);
+  const stage = stages[idx];
+
+  // --- Mock transforms (replace with real services later) ---
+  const doc = useMemo(
+    () => ({
+      document_id: "doc_2024_12_31_0007",
+      source: "upload",
+      filename: "acme_income_statement_2024.pdf",
+      pages: 5,
+      received_at: "2025-12-13T08:10:00+08:00",
+      content_preview: sampleIncomeStatement,
+    }),
+    []
+  );
+
+  const classification = useMemo(
+    () => ({
+      document_id: doc.document_id,
+      statement_type: "INCOME_STATEMENT",
+      period_end: "2024-12-31",
+      currency: "SGD",
+      confidence: 0.93,
+      notes: [
+        "Detected heading: 'Income Statement'",
+        "Found common rows: Revenue, COGS, Gross Profit, Net Profit",
+      ],
+    }),
+    [doc.document_id]
+  );
+
+  const candidates = useMemo(
+    () => ({
+      document_id: doc.document_id,
+      statement_type: classification.statement_type,
+      candidates: [
+        {
+          field_hint: "revenue",
+          label: "Revenue",
+          value: 12500000,
+          confidence: 0.91,
+          context: {
+            page: 1,
+            section: "Top",
+            row_text: "Revenue 12,500,000",
+          },
+        },
+        {
+          field_hint: "cogs",
+          label: "Cost of Goods Sold",
+          value: -7200000,
+          confidence: 0.89,
+          context: {
+            page: 1,
+            section: "Top",
+            row_text: "Cost of Goods Sold (7,200,000)",
+          },
+        },
+        {
+          field_hint: "gross_profit",
+          label: "Gross Profit",
+          value: 5300000,
+          confidence: 0.88,
+          context: {
+            page: 1,
+            section: "Calculated",
+            row_text: "Gross Profit 5,300,000",
+          },
+        },
+        {
+          field_hint: "operating_expenses",
+          label: "Operating Expenses",
+          value: -2150000,
+          confidence: 0.86,
+          context: {
+            page: 1,
+            section: "Operating",
+            row_text: "Operating Expenses (2,150,000)",
+          },
+        },
+        {
+          field_hint: "operating_profit",
+          label: "Operating Profit",
+          value: 3150000,
+          confidence: 0.87,
+          context: {
+            page: 1,
+            section: "Operating",
+            row_text: "Operating Profit 3,150,000",
+          },
+        },
+        {
+          field_hint: "finance_costs",
+          label: "Finance Costs",
+          value: -250000,
+          confidence: 0.84,
+          context: {
+            page: 1,
+            section: "Below",
+            row_text: "Finance Costs (250,000)",
+          },
+        },
+        {
+          field_hint: "other_income",
+          label: "Other Income",
+          value: 100000,
+          confidence: 0.79,
+          context: {
+            page: 1,
+            section: "Below",
+            row_text: "Other Income 100,000",
+          },
+        },
+        {
+          field_hint: "profit_before_tax",
+          label: "Profit Before Tax",
+          value: 3000000,
+          confidence: 0.82,
+          context: {
+            page: 1,
+            section: "Tax",
+            row_text: "Profit Before Tax 3,000,000",
+          },
+        },
+        {
+          field_hint: "tax_expense",
+          label: "Tax Expense",
+          value: -600000,
+          confidence: 0.8,
+          context: {
+            page: 1,
+            section: "Tax",
+            row_text: "Tax Expense (600,000)",
+          },
+        },
+        {
+          field_hint: "net_profit",
+          label: "Net Profit",
+          value: 2400000,
+          confidence: 0.9,
+          context: {
+            page: 1,
+            section: "Bottom",
+            row_text: "Net Profit 2,400,000",
+          },
+        },
+      ],
+      ambiguities: [
+        {
+          item: "other_income",
+          reason:
+            "Could map to 'Other income' or 'Non-operating income' depending on IR taxonomy",
+          action:
+            "Preserve candidate; resolve during canonicalisation by taxonomy rules",
+        },
+      ],
+    }),
+    [doc.document_id, classification.statement_type]
+  );
+
+  const canonicalIR = useMemo(
+    () => ({
+      ir_version: "income_statement.v1",
+      document_id: doc.document_id,
+      statement_type: "INCOME_STATEMENT",
+      period: { end: "2024-12-31", frequency: "ANNUAL" },
+      currency: "SGD",
+      values: {
+        revenue: {
+          amount: 12500000,
+          provenance: { page: 1, row: "Revenue 12,500,000" },
+          confidence: 0.91,
+        },
+        cogs: {
+          amount: -7200000,
+          provenance: { page: 1, row: "Cost of Goods Sold (7,200,000)" },
+          confidence: 0.89,
+        },
+        gross_profit: {
+          amount: 5300000,
+          provenance: { page: 1, row: "Gross Profit 5,300,000" },
+          confidence: 0.88,
+        },
+        operating_expenses: {
+          amount: -2150000,
+          provenance: { page: 1, row: "Operating Expenses (2,150,000)" },
+          confidence: 0.86,
+        },
+        operating_profit: {
+          amount: 3150000,
+          provenance: { page: 1, row: "Operating Profit 3,150,000" },
+          confidence: 0.87,
+        },
+        finance_costs: {
+          amount: -250000,
+          provenance: { page: 1, row: "Finance Costs (250,000)" },
+          confidence: 0.84,
+        },
+        other_income: {
+          amount: 100000,
+          provenance: { page: 1, row: "Other Income 100,000" },
+          confidence: 0.79,
+        },
+        profit_before_tax: {
+          amount: 3000000,
+          provenance: { page: 1, row: "Profit Before Tax 3,000,000" },
+          confidence: 0.82,
+        },
+        tax_expense: {
+          amount: -600000,
+          provenance: { page: 1, row: "Tax Expense (600,000)" },
+          confidence: 0.8,
+        },
+        net_profit: {
+          amount: 2400000,
+          provenance: { page: 1, row: "Net Profit 2,400,000" },
+          confidence: 0.9,
+        },
+      },
+      deterministic_notes: [
+        "Field mappings applied using IR taxonomy rules",
+        "Ambiguity preserved as metadata (if any)",
+      ],
+    }),
+    [doc.document_id]
+  );
+
+  const normalisedIR = useMemo(
+    () => ({
+      ...canonicalIR,
+      normalisation: {
+        currency: { from: "SGD", to: "SGD", fx_rate: 1.0 },
+        scale: { input: "whole", output: "whole" },
+        rounding: { mode: "none" },
+      },
+      values: Object.fromEntries(
+        Object.entries(canonicalIR.values).map(([k, v]: any) => [
+          k,
+          { ...v, amount: Number(v.amount) },
+        ])
+      ),
+    }),
+    [canonicalIR]
+  );
+
+  const validation = useMemo(() => {
+    const revenue = normalisedIR.values.revenue.amount;
+    const cogs = normalisedIR.values.cogs.amount;
+    const gross = normalisedIR.values.gross_profit.amount;
+
+    const checks = [
+      {
+        rule: "gross_profit = revenue + cogs",
+        expected: revenue + cogs,
+        actual: gross,
+        pass: revenue + cogs === gross,
+      },
+      {
+        rule: "net_profit present",
+        expected: "present",
+        actual: normalisedIR.values.net_profit.amount,
+        pass: typeof normalisedIR.values.net_profit.amount === "number",
+      },
+    ];
+
+    const minConf = Math.min(
+      ...Object.values(normalisedIR.values).map((v: any) =>
+        typeof v.confidence === "number" ? v.confidence : 1
+      )
+    );
+
+    const pass = checks.every((c) => c.pass) && minConf >= 0.75;
+
+    return {
+      document_id: normalisedIR.document_id,
+      pass,
+      min_confidence: Number(minConf.toFixed(2)),
+      checks,
+      action: pass ? "AUTO_APPROVE" : "ROUTE_TO_TEAMS_HITL",
+      notes: pass
+        ? ["All deterministic checks passed", "Confidence within bounds"]
+        : ["One or more checks failed or confidence below threshold"],
+    };
+  }, [normalisedIR]);
+
+  const csvOut = useMemo(() => {
+    const header = [
+      "document_id",
+      "period_end",
+      "currency",
+      "revenue",
+      "cogs",
+      "gross_profit",
+      "operating_expenses",
+      "operating_profit",
+      "finance_costs",
+      "other_income",
+      "profit_before_tax",
+      "tax_expense",
+      "net_profit",
+    ];
+
+    const row = [
+      normalisedIR.document_id,
+      normalisedIR.period.end,
+      normalisedIR.currency,
+      normalisedIR.values.revenue.amount,
+      normalisedIR.values.cogs.amount,
+      normalisedIR.values.gross_profit.amount,
+      normalisedIR.values.operating_expenses.amount,
+      normalisedIR.values.operating_profit.amount,
+      normalisedIR.values.finance_costs.amount,
+      normalisedIR.values.other_income.amount,
+      normalisedIR.values.profit_before_tax.amount,
+      normalisedIR.values.tax_expense.amount,
+      normalisedIR.values.net_profit.amount,
+    ];
+
+    return buildCsv(header, row);
+  }, [normalisedIR]);
+
+  // ✅ Mini "tests" to prevent regressions (dev only)
+  useMemo(() => {
+    if (process.env.NODE_ENV === "production") return;
+
+    const s1 = buildCsv(["a", "b"], ["1", "2"]);
+    console.assert(s1 === "a,b\n1,2\n", "CSV basic format should match");
+
+    const s2 = buildCsv(["a"], [undefined]);
+    console.assert(s2 === "a\n\n", "Undefined values should serialize to empty");
+
+    // Ensure no raw newlines are introduced via string literals (compile-time safeguard)
+    const s3 = "line1\nline2";
+    console.assert(s3.includes("\n"), "Newlines should be escaped in literals");
+  }, []);
+
+  const stageOutput: StageOutput = useMemo(() => {
+    switch (stage.id) {
+      case "ingestion":
+        return {
+          kind: "json",
+          title: "Ingested Document Metadata",
+          value: pretty(doc),
+        };
+      case "perception":
+        return {
+          kind: "json",
+          title: "Classification Output",
+          value: pretty(classification),
+        };
+      case "assisted_extraction":
+        return {
+          kind: "json",
+          title: "Candidate Extraction Output",
+          value: pretty(candidates),
+        };
+      case "canonicalisation":
+        return {
+          kind: "json",
+          title: "Canonical IR (System of Record)",
+          value: pretty(canonicalIR),
+        };
+      case "normalisation":
+        return {
+          kind: "json",
+          title: "Normalised IR",
+          value: pretty(normalisedIR),
+        };
+      case "validation":
+        return {
+          kind: "json",
+          title: "Validation Result",
+          value: pretty(validation),
+        };
+      case "output":
+        return { kind: "text", title: "CSV Output", value: csvOut };
+      default:
+        return { kind: "text", title: "Output", value: "" };
+    }
+  }, [stage.id, doc, classification, candidates, canonicalIR, normalisedIR, validation, csvOut]);
+
+  // --- Presentation-only schema tabs ---
+  const irSchemaTemplate = useMemo(
+    () => ({
+      schema_id: "income_statement.v1",
+      description: "Canonical IR schema template for Income Statement (presentation only).",
+      statement_type: "INCOME_STATEMENT",
+      required_fields: [
+        "period.end",
+        "currency",
+        "values.revenue.amount",
+        "values.net_profit.amount",
+      ],
+      provenance_type: {
+        page: "number",
+        row: "string",
+        section: "string?",
+        snippet: "string?",
+      },
+      fields: {
+        period: {
+          end: { type: "date", example: "2024-12-31" },
+          frequency: {
+            type: "enum",
+            values: ["ANNUAL", "QUARTERLY", "MONTHLY"],
+            example: "ANNUAL",
+          },
+        },
+        currency: { type: "string", example: "SGD" },
+        values: {
+          revenue: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          cogs: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          gross_profit: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          operating_expenses: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          operating_profit: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          finance_costs: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          other_income: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          profit_before_tax: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          tax_expense: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+          net_profit: {
+            amount: { type: "number" },
+            provenance: { type: "provenance" },
+            confidence: { type: "number" },
+          },
+        },
+      },
+      validation_rules: [
+        "gross_profit = revenue + cogs",
+        "operating_profit = gross_profit + operating_expenses",
+        "profit_before_tax = operating_profit + other_income + finance_costs",
+      ],
+    }),
+    []
+  );
+
+  const candidateSchemaTemplate = useMemo(
+    () => ({
+      schema_id: "candidate_extraction.v1",
+      description:
+        "Intermediate candidate schema produced by Assisted Extraction Agent (bounded + machine-readable).",
+      document_id: "string",
+      statement_type: "enum",
+      candidates: [
+        {
+          field_hint: "string (e.g., revenue, cogs)",
+          label: "string (as seen in document)",
+          value: "number|string",
+          confidence: "number 0..1",
+          context: {
+            page: "number",
+            section: "string?",
+            row_text: "string?",
+            bbox: "[x1,y1,x2,y2]? (optional if using PDF layout)",
+          },
+          evidence: { snippet: "string?", strategy: "enum: table|text|hybrid" },
+        },
+      ],
+      ambiguities: [{ item: "string", reason: "string", action: "string" }],
+      meta: {
+        model: "string",
+        prompt_version: "string",
+        extracted_at: "datetime",
+      },
+    }),
+    []
+  );
+
+  const rulePacksTemplate = useMemo(
+    () => ({
+      statement_type: "INCOME_STATEMENT",
+      version: "v1",
+      normalisation_rules: {
+        id: "income_statement.normalisation.rules.v1",
+        purpose: "Make values comparable and consistent without changing meaning.",
+        rules: [
+          {
+            name: "parse_parentheses_as_negative",
+            when: "value is in parentheses (e.g., (7,200,000))",
+            then: "convert to negative number",
+          },
+          {
+            name: "currency_scale",
+            when: "Currency note present (e.g., SGD) and scale (whole/thousand/million)",
+            then: "apply scale normalization; store scale metadata",
+          },
+          {
+            name: "date_format",
+            when: "period end detected",
+            then: "normalize to ISO-8601 (YYYY-MM-DD)",
+          },
+        ],
+      },
+      validation_rules: {
+        id: "income_statement.validation.rules.v1",
+        purpose: "Deterministic gates to decide AUTO_APPROVE vs HITL.",
+        rules: [
+          {
+            name: "gross_profit_identity",
+            check: "gross_profit = revenue + cogs",
+            severity: "error",
+          },
+          {
+            name: "operating_profit_identity",
+            check: "operating_profit = gross_profit + operating_expenses",
+            severity: "warn",
+          },
+          {
+            name: "required_fields_present",
+            check: "period.end, currency, revenue, net_profit present",
+            severity: "error",
+          },
+          {
+            name: "confidence_floor",
+            check: "min_confidence >= 0.75",
+            severity: "warn",
+          },
+        ],
+      },
+      notes:
+        "These are presentation templates. In production, rule packs are versioned artifacts stored in a repo/config store and loaded by deterministic services.",
+    }),
+    []
+  );
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-2xl font-semibold tracking-tight">
+            Pipeline Visual Prototype
+          </div>
+          <div className="text-sm text-muted-foreground">
+            Sample: Income Statement → Candidates → Canonical IR → Validated CSV
+            (Agentic used surgically)
+          </div>
+        </div>
+      </div>
+
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as any)}
+        className="w-full"
+      >
+        <div className="flex items-center justify-between gap-4">
+          <TabsList className="rounded-2xl">
+            <TabsTrigger value="prototype" className="rounded-xl">
+              Pipeline Prototype
+            </TabsTrigger>
+            <TabsTrigger value="ir" className="rounded-xl">
+              IR Schema (Template)
+            </TabsTrigger>
+            <TabsTrigger value="candidate" className="rounded-xl">
+              Extraction Output Schema
+            </TabsTrigger>
+            <TabsTrigger value="rules" className="rounded-xl">
+              Rule Packs (Templates)
+            </TabsTrigger>
+          </TabsList>
+
+          {activeTab === "prototype" && (
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={showSourcePreview}
+                onCheckedChange={setShowSourcePreview}
+              />
+              <Label className="text-sm text-muted-foreground">
+                Show source preview
+              </Label>
+            </div>
+          )}
+        </div>
+
+        <TabsContent value="prototype" className="mt-6 space-y-6">
+          <div className="flex items-center justify-between gap-3">
+            <div />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setIdx((v) => Math.max(0, v - 1))}
+                disabled={idx === 0}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> Prev
+              </Button>
+              <Button
+                onClick={() => setIdx((v) => Math.min(stages.length - 1, v + 1))}
+                disabled={idx === stages.length - 1}
+              >
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+
+          <Card className="rounded-2xl shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {stages.map((s, i) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setIdx(i)}
+                    className={`px-3 py-2 rounded-xl border text-sm flex items-center gap-2 transition ${
+                      i === idx
+                        ? "bg-muted border-foreground/20"
+                        : "bg-background hover:bg-muted/50"
+                    }`}
+                  >
+                    <span className="text-muted-foreground">{i + 1}.</span>
+                    <span className="font-medium">{s.title}</span>
+                    <Badge
+                      variant={s.type === "Agentic" ? "secondary" : "outline"}
+                      className="ml-1"
+                    >
+                      {s.type}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="rounded-2xl shadow-sm">
+              <CardContent className="p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-muted">{stage.icon}</div>
+                  <div>
+                    <div className="text-lg font-semibold">{stage.title}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {stage.summary}
+                    </div>
+                  </div>
+                  <div className="ml-auto">
+                    <Badge
+                      variant={stage.type === "Agentic" ? "secondary" : "outline"}
+                    >
+                      {stage.type === "Agentic" ? (
+                        <span className="flex items-center gap-1">
+                          <Wand2 className="h-3 w-3" /> Agentic
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <ShieldCheck className="h-3 w-3" /> Deterministic
+                        </span>
+                      )}
+                    </Badge>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">What happens here</div>
+                  <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
+                    {stage.whatHappens.map((x) => (
+                      <li key={x}>{x}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                    Trust boundary reminders
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {stage.type === "Agentic" ? (
+                      <>
+                        LLM assistance is bounded to structured outputs and strict
+                        guardrails; no authoritative outputs are produced here.
+                      </>
+                    ) : (
+                      <>
+                        Outputs here are deterministic, schema-enforced, and
+                        auditable. This is where system-of-record guarantees apply.
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl shadow-sm">
+              <CardContent className="p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-medium">{stageOutput.title}</div>
+                  {stage.id === "canonicalisation" && (
+                    <Badge variant="outline" className="ml-auto">
+                      System of Record
+                    </Badge>
+                  )}
+                  {stage.id === "validation" && (
+                    <Badge
+                      variant={validation.pass ? "outline" : "secondary"}
+                      className="ml-auto"
+                    >
+                      {validation.pass ? "AUTO_APPROVE" : "ROUTE_TO_TEAMS_HITL"}
+                    </Badge>
+                  )}
+                </div>
+
+                <ScrollArea className="h-[420px] rounded-xl border bg-background">
+                  <pre className="text-xs p-4 whitespace-pre-wrap leading-relaxed">
+                    {stageOutput.value}
+                  </pre>
+                </ScrollArea>
+
+                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Prototype note: replace mock
+                  transforms with real services (Step Functions + Lambdas/containers).
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {showSourcePreview && (
+            <Card className="rounded-2xl shadow-sm">
+              <CardContent className="p-5 space-y-2">
+                <div className="text-sm font-medium">
+                  Sample Source Document (preview)
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  This is a presentation stand-in for a PDF. In implementation, you
+                  can hide this entirely or show only reviewer snippets in HITL.
+                </div>
+                <ScrollArea className="h-[220px] rounded-xl border bg-background">
+                  <pre className="text-xs p-4 whitespace-pre-wrap leading-relaxed">
+                    {sampleIncomeStatement}
+                  </pre>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="ir" className="mt-6">
+          <Card className="rounded-2xl shadow-sm">
+            <CardContent className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-muted">
+                  <Code2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold">
+                    Canonical IR Schema Template
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Presentation-only view to explain how determinism is enforced.
+                  </div>
+                </div>
+                <Badge variant="outline" className="ml-auto">
+                  Template
+                </Badge>
+              </div>
+              <Separator />
+              <ScrollArea className="h-[560px] rounded-xl border bg-background">
+                <pre className="text-xs p-4 whitespace-pre-wrap leading-relaxed">
+                  {pretty(irSchemaTemplate)}
+                </pre>
+              </ScrollArea>
+              <div className="text-xs text-muted-foreground">
+                Tip: in production, the IR schema is a versioned contract used by
+                deterministic services; end-users don’t need to see it.
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="candidate" className="mt-6">
+          <Card className="rounded-2xl shadow-sm">
+            <CardContent className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-muted">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold">
+                    Assisted Extraction Output Schema
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Bounded, machine-readable contract produced by the extraction
+                    agent.
+                  </div>
+                </div>
+                <Badge variant="secondary" className="ml-auto">
+                  Agentic output
+                </Badge>
+              </div>
+              <Separator />
+              <ScrollArea className="h-[560px] rounded-xl border bg-background">
+                <pre className="text-xs p-4 whitespace-pre-wrap leading-relaxed">
+                  {pretty(candidateSchemaTemplate)}
+                </pre>
+              </ScrollArea>
+              <div className="text-xs text-muted-foreground">
+                Why this exists: it constrains the agent, enables validation, and
+                makes canonicalisation deterministic.
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="rules" className="mt-6">
+          <Card className="rounded-2xl shadow-sm">
+            <CardContent className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-muted">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-lg font-semibold">
+                    Normalisation & Validation Rule Packs
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Presentation-only templates showing where deterministic rules
+                    live (separate from LLMs and agents).
+                  </div>
+                </div>
+                <Badge variant="outline" className="ml-auto">
+                  Templates
+                </Badge>
+              </div>
+              <Separator />
+              <ScrollArea className="h-[560px] rounded-xl border bg-background">
+                <pre className="text-xs p-4 whitespace-pre-wrap leading-relaxed">
+                  {pretty(rulePacksTemplate)}
+                </pre>
+              </ScrollArea>
+              <div className="text-xs text-muted-foreground">
+                In production, these rule packs are versioned artifacts (e.g., in
+                Git/SSM/S3) and loaded by deterministic services.
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+
